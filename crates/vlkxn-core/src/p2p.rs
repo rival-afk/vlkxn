@@ -6,13 +6,15 @@ use libp2p::{
     noise,
     ping,
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, PeerId, Swarm, SwarmBuilder,
+    tcp, yamux, PeerId, StreamProtocol, Swarm, SwarmBuilder,
 };
 use tokio::sync::mpsc;
-use tracing::{debug, info};
+use tracing::{debug, info, warn};
 
 use crate::crypto::KeyManager;
 use crate::types::*;
+
+pub const VLKXN_PROTOCOL: StreamProtocol = StreamProtocol::new("/vlkxn/data/1.0.0");
 
 #[derive(NetworkBehaviour)]
 pub struct VlkxnBehaviour {
@@ -26,16 +28,20 @@ pub struct P2pNode {
     pub swarm: Swarm<VlkxnBehaviour>,
     pub peer_id: PeerId,
     pub event_tx: mpsc::UnboundedSender<NetworkEvent>,
+    pub packet_tx: mpsc::UnboundedSender<Vec<u8>>,
     peers: HashMap<PeerId, PeerInfo>,
-    _room: RoomName,
+    _room: String,
+    virtual_ip: std::net::IpAddr,
 }
 
 impl P2pNode {
     pub async fn new(
         key_manager: &KeyManager,
-        _room: RoomName,
+    _room: String,
+        virtual_ip: std::net::IpAddr,
     ) -> anyhow::Result<(Self, mpsc::UnboundedReceiver<NetworkEvent>)> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
+        let (packet_tx, _packet_rx) = mpsc::unbounded_channel();
 
         let keypair = key_manager.signing_key()?;
         let libp2p_keypair = libp2p::identity::Keypair::ed25519_from_bytes(keypair.to_bytes())
@@ -45,6 +51,7 @@ impl P2pNode {
 
         let kad_store = kad::store::MemoryStore::new(peer_id);
         let kademlia = kad::Behaviour::new(peer_id, kad_store);
+
         let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
         let identify = identify::Behaviour::new(identify::Config::new(
             "/vlkxn/1.0.0".into(),
@@ -75,8 +82,10 @@ impl P2pNode {
             swarm,
             peer_id,
             event_tx,
+            packet_tx,
             peers: HashMap::new(),
-            _room,
+            _room: _room,
+            virtual_ip,
         };
 
         Ok((node, event_rx))
@@ -106,42 +115,68 @@ impl P2pNode {
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Mdns(mdns::Event::Discovered(list))) => {
                 for (peer_id, _addr) in list {
                     info!("mDNS discovered: {peer_id}");
-                    let info = PeerInfo {
-                        node_id: peer_id.to_bytes(),
-                        nickname: peer_id.to_string(),
-                        virtual_ip: "0.0.0.0".parse().unwrap(),
-                        ping_ms: 0,
-                        connection_type: ConnectionType::Direct,
-                    };
-                    self.peers.insert(peer_id, info.clone());
-                    let _ = self.event_tx.send(NetworkEvent::PeerConnected(info));
+                    self.add_peer(peer_id, ConnectionType::Direct);
                 }
             }
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Mdns(mdns::Event::Expired(list))) => {
                 for (peer_id, _addr) in list {
                     info!("mDNS expired: {peer_id}");
-                    self.peers.remove(&peer_id);
-                    let _ = self
-                        .event_tx
-                        .send(NetworkEvent::PeerDisconnected(peer_id.to_bytes()));
+                    self.remove_peer(&peer_id);
                 }
             }
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Identify(
                 identify::Event::Received { ref info, .. },
             )) => {
-                info!("Identified peer: {:?}", info.public_key);
+                debug!("Identified peer: {:?}", info.public_key);
             }
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Kademlia(
                 kad::Event::RoutingUpdated { peer, .. },
             )) => {
-                info!("Kademlia routing updated: {peer}");
+                if !self.peers.contains_key(&peer) {
+                    info!("Kademlia discovered new peer: {peer}");
+                    self.add_peer(peer, ConnectionType::Direct);
+                }
             }
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!("Listening on {address}");
             }
-            _ => {
-                debug!("Unhandled swarm event: {:?}", event);
+            SwarmEvent::IncomingConnection { connection_id, local_addr, send_back_addr } => {
+                debug!("Incoming connection: {connection_id} from {send_back_addr} on {local_addr}");
             }
+            SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
+                info!("Connection established: {peer_id} via {}", endpoint.get_remote_address());
+                if !self.peers.contains_key(&peer_id) {
+                    self.add_peer(peer_id, ConnectionType::Direct);
+                }
+            }
+            SwarmEvent::ConnectionClosed { peer_id, cause, .. } => {
+                warn!("Connection closed: {peer_id}: {cause:?}");
+                self.remove_peer(&peer_id);
+            }
+            _ => {
+                debug!("Unhandled swarm event");
+            }
+        }
+    }
+
+    fn add_peer(&mut self, peer_id: PeerId, conn_type: ConnectionType) {
+        if self.peers.contains_key(&peer_id) {
+            return;
+        }
+        let info = PeerInfo {
+            node_id: peer_id.to_bytes(),
+            nickname: peer_id.to_string()[..8].to_string(),
+            virtual_ip: self.virtual_ip,
+            ping_ms: 0,
+            connection_type: conn_type,
+        };
+        self.peers.insert(peer_id, info.clone());
+        let _ = self.event_tx.send(NetworkEvent::PeerConnected(info));
+    }
+
+    fn remove_peer(&mut self, peer_id: &PeerId) {
+        if self.peers.remove(peer_id).is_some() {
+            let _ = self.event_tx.send(NetworkEvent::PeerDisconnected(peer_id.to_bytes()));
         }
     }
 
@@ -151,5 +186,13 @@ impl P2pNode {
 
     pub fn peer_id(&self) -> PeerId {
         self.peer_id
+    }
+
+    pub fn peer_count(&self) -> usize {
+        self.peers.len()
+    }
+
+    pub fn peer_list(&self) -> Vec<PeerInfo> {
+        self.peers.values().cloned().collect()
     }
 }

@@ -1,0 +1,1 @@
+window.SIDEBAR_ITEMS = {"mod":["connection","either","muxing","peer_record","signed_envelope","transport","upgrade"],"struct":["DecodeError","Multiaddr","PeerId"],"type":["Negotiated"]};
