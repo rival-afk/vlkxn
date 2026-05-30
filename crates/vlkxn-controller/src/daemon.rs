@@ -44,9 +44,11 @@ impl Daemon {
         tun.create(virtual_ip, 16).await?;
         info!("TUN created with IP: {virtual_ip}");
 
+        let pwd_hash = vlkxn_core::password_hash(&self.config.network.password);
         let (mut p2p_node, event_rx) = P2pNode::new(
             &self.key_manager,
             self.config.network.room.clone(),
+            pwd_hash,
             virtual_ip,
         )
         .await?;

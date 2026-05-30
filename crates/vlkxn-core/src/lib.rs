@@ -5,6 +5,8 @@ pub mod p2p;
 pub mod tun;
 pub mod types;
 
+pub use p2p::password_hash;
+
 pub use config::Config;
 pub use crypto::KeyManager;
 pub use p2p::P2pNode;

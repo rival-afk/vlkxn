@@ -22,6 +22,8 @@ enum Commands {
         #[arg(long)]
         room: Option<String>,
         #[arg(long)]
+        password: Option<String>,
+        #[arg(long)]
         nick: Option<String>,
     },
     /// Stop the virtual network
@@ -136,13 +138,20 @@ async fn main() -> anyhow::Result<()> {
     let cli = Cli::parse();
 
     match cli.command {
-        Commands::Up { room, nick } => {
+        Commands::Up {
+            room,
+            password,
+            nick,
+        } => {
             print_welcome();
             print_permission_hint();
 
             let mut daemon = Daemon::new().await?;
             if let Some(room) = room {
                 daemon.config.network.room = room;
+            }
+            if let Some(password) = password {
+                daemon.config.network.password = password;
             }
             if let Some(nick) = nick {
                 daemon.config.nickname.value = nick;

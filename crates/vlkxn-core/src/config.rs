@@ -19,6 +19,7 @@ pub struct NicknameConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
     pub room: String,
+    pub password: String,
     pub autostart: bool,
 }
 
@@ -49,6 +50,7 @@ impl Default for Config {
             },
             network: NetworkConfig {
                 room: "public".into(),
+                password: String::new(),
                 autostart: false,
             },
             relay: RelayConfig {

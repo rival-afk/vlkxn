@@ -15,6 +15,15 @@ use tracing::{debug, info, warn};
 use crate::crypto::KeyManager;
 use crate::types::*;
 
+pub fn password_hash(password: &str) -> String {
+    if password.is_empty() {
+        return String::new();
+    }
+    use sha2::Digest;
+    let hash = sha2::Sha256::digest(password.as_bytes());
+    hex::encode(hash)
+}
+
 pub const VLKXN_PROTOCOL: StreamProtocol = StreamProtocol::new("/vlkxn/data/1.0.0");
 
 #[derive(Clone, Default)]
@@ -108,6 +117,7 @@ pub struct P2pNode {
     pub packet_rx: mpsc::UnboundedReceiver<Vec<u8>>,
     peers: HashMap<PeerId, PeerInfo>,
     _room: String,
+    password_hash: String,
     virtual_ip: std::net::IpAddr,
     pending_requests: HashMap<request_response::OutboundRequestId, PeerId>,
 }
@@ -116,6 +126,7 @@ impl P2pNode {
     pub async fn new(
         key_manager: &KeyManager,
         _room: String,
+        password_hash: String,
         virtual_ip: std::net::IpAddr,
     ) -> anyhow::Result<(Self, mpsc::UnboundedReceiver<NetworkEvent>)> {
         let (event_tx, event_rx) = mpsc::unbounded_channel();
@@ -130,10 +141,12 @@ impl P2pNode {
         let kad_store = kad::store::MemoryStore::new(peer_id);
         let kademlia = kad::Behaviour::new(peer_id, kad_store);
         let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
-        let identify = identify::Behaviour::new(identify::Config::new(
-            "/vlkxn/1.0.0".into(),
-            libp2p_keypair.public(),
-        ));
+        let mut identify_cfg =
+            identify::Config::new("/vlkxn/1.0.0".into(), libp2p_keypair.public());
+        if !password_hash.is_empty() {
+            identify_cfg = identify_cfg.with_agent_version(format!("vlkxn/{}", password_hash));
+        }
+        let identify = identify::Behaviour::new(identify_cfg);
         let ping = ping::Behaviour::new(ping::Config::new());
         let dcutr = dcutr::Behaviour::new(peer_id);
         let data = request_response::Behaviour::new(
@@ -170,6 +183,7 @@ impl P2pNode {
             packet_rx,
             peers: HashMap::new(),
             _room,
+            password_hash,
             virtual_ip,
             pending_requests: HashMap::new(),
         };
@@ -215,10 +229,15 @@ impl P2pNode {
                 }
             }
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Identify(identify::Event::Received {
-                ref info,
+                info,
                 ..
             })) => {
-                debug!("Identified peer: {:?}", info.public_key);
+                let peer_id = PeerId::from(info.public_key);
+                let peer_hash = info.agent_version.trim_start_matches("vlkxn/");
+                if !self.password_hash.is_empty() && peer_hash != self.password_hash {
+                    warn!("Peer {peer_id} has wrong password, disconnecting");
+                    let _ = self.swarm.disconnect_peer_id(peer_id);
+                }
             }
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Kademlia(kad::Event::RoutingUpdated {
                 peer,
