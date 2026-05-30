@@ -51,6 +51,10 @@ mod platform {
             Command::new("ip")
                 .args(["link", "set", "dev", name, "up"])
                 .status()?;
+            // Route virtual subnet through TUN
+            Command::new("ip")
+                .args(["route", "add", crate::types::VIRTUAL_NETWORK, "dev", name])
+                .status()?;
             Ok(())
         }
 

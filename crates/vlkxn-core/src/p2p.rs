@@ -4,7 +4,7 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::{
-    PeerId, StreamProtocol, Swarm, SwarmBuilder, identify, kad, mdns, noise, ping,
+    PeerId, StreamProtocol, Swarm, SwarmBuilder, dcutr, identify, kad, mdns, noise, ping,
     request_response::{self, Codec, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
@@ -95,6 +95,7 @@ pub struct VlkxnBehaviour {
     pub mdns: mdns::tokio::Behaviour,
     pub identify: identify::Behaviour,
     pub ping: ping::Behaviour,
+    pub dcutr: dcutr::Behaviour,
     pub data: request_response::Behaviour<BytesCodec>,
 }
 
@@ -133,6 +134,7 @@ impl P2pNode {
             libp2p_keypair.public(),
         ));
         let ping = ping::Behaviour::new(ping::Config::new());
+        let dcutr = dcutr::Behaviour::new(peer_id);
         let data = request_response::Behaviour::new(
             vec![(VLKXN_PROTOCOL, ProtocolSupport::Full)],
             request_response::Config::default(),
@@ -143,6 +145,7 @@ impl P2pNode {
             mdns,
             identify,
             ping,
+            dcutr,
             data,
         };
 
@@ -175,8 +178,14 @@ impl P2pNode {
 
     pub async fn run(&mut self) {
         loop {
-            let event = self.swarm.select_next_some().await;
-            self.handle_event(event).await;
+            tokio::select! {
+                event = self.swarm.select_next_some() => {
+                    self.handle_event(event).await;
+                }
+                Some(packet) = self.packet_rx.recv() => {
+                    self.broadcast_data(packet);
+                }
+            }
         }
     }
 
@@ -218,6 +227,9 @@ impl P2pNode {
                     info!("Kademlia discovered new peer: {peer}");
                     self.add_peer(peer, ConnectionType::Direct);
                 }
+            }
+            SwarmEvent::Behaviour(VlkxnBehaviourEvent::Dcutr(event)) => {
+                debug!("DCUtR: {event:?}");
             }
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Data(event)) => {
                 self.handle_data_event(event);
