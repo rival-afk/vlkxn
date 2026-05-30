@@ -1,7 +1,7 @@
 use std::sync::Arc;
 
 use tokio::sync::Mutex;
-use tracing::{error, info};
+use tracing::{debug, error, info, warn};
 use vlkxn_core::config::Config;
 use vlkxn_core::crypto::KeyManager;
 use vlkxn_core::p2p::P2pNode;
@@ -22,13 +22,7 @@ impl Daemon {
         let keys_path = Config::keys_path()?;
         let key_manager = KeyManager::load_or_generate(&keys_path)?;
 
-        Ok(Self {
-            config,
-            key_manager,
-            p2p: None,
-            tun: None,
-            running: false,
-        })
+        Ok(Self { config, key_manager, p2p: None, tun: None, running: false })
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
@@ -48,18 +42,19 @@ impl Daemon {
         )
         .await?;
 
-        info!("P2P node started with PeerId: {}", p2p_node.peer_id());
-        info!("Virtual IP: {virtual_ip}");
+        info!("P2P peer ID: {}", p2p_node.peer_id());
 
         let p2p = Arc::new(Mutex::new(p2p_node));
         let tun = Arc::new(Mutex::new(tun));
 
-        let p2p_clone = p2p.clone();
+        // P2P event loop
+        let p2p_ev = p2p.clone();
         tokio::spawn(async move {
-            let mut node = p2p_clone.lock().await;
-            node.run().await;
+            p2p_ev.lock().await.run().await;
         });
 
+        // Network event handler: forward P2P packets → TUN
+        let tun_ev = tun.clone();
         tokio::spawn(async move {
             let mut event_rx = event_rx;
             while let Some(event) = event_rx.recv().await {
@@ -73,19 +68,25 @@ impl Daemon {
                     NetworkEvent::VirtualIpAssigned(ip) => {
                         info!("Virtual IP assigned: {ip}");
                     }
-                    NetworkEvent::PacketReceived(data) => {
-                        let _ = data;
+                    NetworkEvent::PacketReceived(pkt) => {
+                        debug!("Packet from peer ({} bytes)", pkt.data.len());
+                        if let Ok(mut tun) = tun_ev.try_lock() {
+                            if let Err(e) = tun.write_packet(&pkt.data).await {
+                                warn!("TUN write error: {e}");
+                            }
+                        }
                     }
                 }
             }
         });
 
-        let p2p_clone3 = p2p.clone();
-        let tun_clone = tun.clone();
+        // TUN reader: forward TUN packets → P2P
+        let p2p_tun = p2p.clone();
+        let tun_reader = tun.clone();
         tokio::spawn(async move {
             let mut buf = vec![0u8; 65535];
             loop {
-                let n = match tun_clone.lock().await.read_packet(&mut buf).await {
+                let n = match tun_reader.lock().await.read_packet(&mut buf).await {
                     Ok(n) => n,
                     Err(e) => {
                         if would_block(&e) {
@@ -98,10 +99,15 @@ impl Daemon {
                     }
                 };
 
-                let _packet = buf[..n].to_vec();
-                let p2p_guard = p2p_clone3.lock().await;
-                let _peer_count = p2p_guard.peer_count();
-                drop(p2p_guard);
+                let packet = buf[..n].to_vec();
+
+                // Skip non-IP packets (ARP, etc.)
+                if packet.is_empty() || packet.len() < 20 {
+                    continue;
+                }
+
+                let mut p2p = p2p_tun.lock().await;
+                p2p.broadcast_data(packet);
             }
         });
 
@@ -109,7 +115,7 @@ impl Daemon {
         self.tun = Some(tun);
         self.running = true;
 
-        info!("Vlkxn daemon started successfully");
+        info!("Vlkxn daemon started");
         Ok(())
     }
 
@@ -128,13 +134,8 @@ impl Daemon {
 
     pub fn status(&self) -> String {
         if self.running {
-            let peer_count = self
-                .p2p
-                .as_ref()
-                .map(|_| "active".to_string())
-                .unwrap_or_else(|| "initializing".to_string());
             format!(
-                "Vlkxn is running\nRoom: {}\nPeers: {peer_count}",
+                "Vlkxn is running\nRoom: {}\nPeers: active",
                 self.config.network.room,
             )
         } else {

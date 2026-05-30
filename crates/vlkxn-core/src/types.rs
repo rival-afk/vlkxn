@@ -29,11 +29,17 @@ pub enum ConnectionType {
 }
 
 #[derive(Debug, Clone)]
+pub struct PacketData {
+    pub from: NodeId,
+    pub data: Vec<u8>,
+}
+
+#[derive(Debug, Clone)]
 pub enum NetworkEvent {
     PeerConnected(PeerInfo),
     PeerDisconnected(NodeId),
     VirtualIpAssigned(IpAddr),
-    PacketReceived(Vec<u8>),
+    PacketReceived(PacketData),
 }
 
 pub const VIRTUAL_NETWORK: &str = "10.144.0.0/16";

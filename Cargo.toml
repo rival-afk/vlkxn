@@ -33,6 +33,9 @@ libp2p = { version = "0.54", features = [
     "identify",
     "macros",
     "ping",
+    "dcutr",
+    "relay",
+    "request-response",
 ] }
 ed25519-dalek = { version = "2.1", features = ["serde"] }
 rand = "0.8"
@@ -43,3 +46,4 @@ futures = "0.3"
 bytes = "1.6"
 ipnetwork = "0.20"
 pnet = "0.35"
+async-trait = "0.1"
