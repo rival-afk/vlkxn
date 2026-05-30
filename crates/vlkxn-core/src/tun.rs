@@ -79,7 +79,7 @@ mod platform {
     use tokio::sync::Mutex;
 
     pub struct TunFd {
-        _adapter: wintun::Adapter,
+        _adapter: Arc<wintun::Adapter>,
         session: Arc<wintun::Session>,
         read_buf: Arc<Mutex<Vec<u8>>>,
         read_ready: Arc<tokio::sync::Notify>,
