@@ -1,13 +1,13 @@
 use std::collections::HashMap;
 
 use async_trait::async_trait;
-use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use futures::StreamExt;
+use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::{
-    dcutr, identify, kad, mdns, noise, ping, relay,
+    PeerId, StreamProtocol, Swarm, SwarmBuilder, dcutr, identify, kad, mdns, noise, ping, relay,
     request_response::{self, Codec, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
-    tcp, yamux, PeerId, StreamProtocol, Swarm, SwarmBuilder,
+    tcp, yamux,
 };
 use tokio::sync::mpsc;
 use tracing::{debug, info, warn};
@@ -26,8 +26,13 @@ impl Codec for BytesCodec {
     type Request = Vec<u8>;
     type Response = Vec<u8>;
 
-    async fn read_request<T>(&mut self, _protocol: &Self::Protocol, io: &mut T) -> std::io::Result<Self::Request>
-    where T: AsyncRead + Unpin + Send,
+    async fn read_request<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+    ) -> std::io::Result<Self::Request>
+    where
+        T: AsyncRead + Unpin + Send,
     {
         let mut len_buf = [0u8; 4];
         io.read_exact(&mut len_buf).await?;
@@ -37,8 +42,13 @@ impl Codec for BytesCodec {
         Ok(buf)
     }
 
-    async fn read_response<T>(&mut self, _protocol: &Self::Protocol, io: &mut T) -> std::io::Result<Self::Response>
-    where T: AsyncRead + Unpin + Send,
+    async fn read_response<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+    ) -> std::io::Result<Self::Response>
+    where
+        T: AsyncRead + Unpin + Send,
     {
         let mut len_buf = [0u8; 4];
         io.read_exact(&mut len_buf).await?;
@@ -48,8 +58,14 @@ impl Codec for BytesCodec {
         Ok(buf)
     }
 
-    async fn write_request<T>(&mut self, _protocol: &Self::Protocol, io: &mut T, req: Self::Request) -> std::io::Result<()>
-    where T: AsyncWrite + Unpin + Send,
+    async fn write_request<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        req: Self::Request,
+    ) -> std::io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
     {
         let len = (req.len() as u32).to_be_bytes();
         io.write_all(&len).await?;
@@ -57,8 +73,14 @@ impl Codec for BytesCodec {
         Ok(())
     }
 
-    async fn write_response<T>(&mut self, _protocol: &Self::Protocol, io: &mut T, res: Self::Response) -> std::io::Result<()>
-    where T: AsyncWrite + Unpin + Send,
+    async fn write_response<T>(
+        &mut self,
+        _protocol: &Self::Protocol,
+        io: &mut T,
+        res: Self::Response,
+    ) -> std::io::Result<()>
+    where
+        T: AsyncWrite + Unpin + Send,
     {
         let len = (res.len() as u32).to_be_bytes();
         io.write_all(&len).await?;
@@ -192,32 +214,32 @@ impl P2pNode {
                     self.remove_peer(&peer_id);
                 }
             }
-            SwarmEvent::Behaviour(VlkxnBehaviourEvent::Identify(
-                identify::Event::Received { ref info, .. },
-            )) => {
+            SwarmEvent::Behaviour(VlkxnBehaviourEvent::Identify(identify::Event::Received {
+                ref info,
+                ..
+            })) => {
                 debug!("Identified peer: {:?}", info.public_key);
             }
-            SwarmEvent::Behaviour(VlkxnBehaviourEvent::Kademlia(
-                kad::Event::RoutingUpdated { peer, .. },
-            )) => {
+            SwarmEvent::Behaviour(VlkxnBehaviourEvent::Kademlia(kad::Event::RoutingUpdated {
+                peer,
+                ..
+            })) => {
                 if !self.peers.contains_key(&peer) {
                     info!("Kademlia discovered new peer: {peer}");
                     self.add_peer(peer, ConnectionType::Direct);
                 }
             }
-            SwarmEvent::Behaviour(VlkxnBehaviourEvent::Relay(event)) => {
-                match event {
-                    relay::client::Event::ReservationReqAccepted { relay_peer_id, .. } => {
-                        info!("Relay reservation accepted by {relay_peer_id}");
-                    }
-                    relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
-                        info!("Outbound circuit via {relay_peer_id}");
-                    }
-                    relay::client::Event::InboundCircuitEstablished { src_peer_id, .. } => {
-                        info!("Inbound circuit from {src_peer_id}");
-                    }
+            SwarmEvent::Behaviour(VlkxnBehaviourEvent::Relay(event)) => match event {
+                relay::client::Event::ReservationReqAccepted { relay_peer_id, .. } => {
+                    info!("Relay reservation accepted by {relay_peer_id}");
                 }
-            }
+                relay::client::Event::OutboundCircuitEstablished { relay_peer_id, .. } => {
+                    info!("Outbound circuit via {relay_peer_id}");
+                }
+                relay::client::Event::InboundCircuitEstablished { src_peer_id, .. } => {
+                    info!("Inbound circuit from {src_peer_id}");
+                }
+            },
             SwarmEvent::Behaviour(VlkxnBehaviourEvent::Dcutr(event)) => {
                 debug!("DCUtR: {event:?}");
             }
@@ -227,12 +249,27 @@ impl P2pNode {
             SwarmEvent::NewListenAddr { address, .. } => {
                 info!("Listening on {address}");
             }
-            SwarmEvent::IncomingConnection { connection_id, local_addr, send_back_addr } => {
-                debug!("Incoming connection: {connection_id} from {send_back_addr} on {local_addr}");
+            SwarmEvent::IncomingConnection {
+                connection_id,
+                local_addr,
+                send_back_addr,
+            } => {
+                debug!(
+                    "Incoming connection: {connection_id} from {send_back_addr} on {local_addr}"
+                );
             }
-            SwarmEvent::ConnectionEstablished { peer_id, endpoint, .. } => {
-                info!("Connection: {peer_id} via {}", endpoint.get_remote_address());
-                let conn_type = if endpoint.is_relayed() { ConnectionType::Relay } else { ConnectionType::Direct };
+            SwarmEvent::ConnectionEstablished {
+                peer_id, endpoint, ..
+            } => {
+                info!(
+                    "Connection: {peer_id} via {}",
+                    endpoint.get_remote_address()
+                );
+                let conn_type = if endpoint.is_relayed() {
+                    ConnectionType::Relay
+                } else {
+                    ConnectionType::Direct
+                };
                 if !self.peers.contains_key(&peer_id) {
                     self.add_peer(peer_id, conn_type);
                 }
@@ -249,27 +286,42 @@ impl P2pNode {
 
     fn handle_data_event(&mut self, event: request_response::Event<Vec<u8>, Vec<u8>>) {
         match event {
-            request_response::Event::Message { peer, message } => {
-                match message {
-                    request_response::Message::Request { request, channel, .. } => {
-                        let n = request.len();
-                        debug!("Data from {peer}: {n} bytes");
-                        let _ = self.swarm.behaviour_mut().data.send_response(channel, Vec::new());
-                        let _ = self.event_tx.send(NetworkEvent::PacketReceived(PacketData {
-                            from: peer.to_bytes(),
-                            data: request,
-                        }));
-                    }
-                    request_response::Message::Response { request_id, response: _ } => {
-                        debug!("Data response {request_id}");
-                        self.pending_requests.remove(&request_id);
-                    }
+            request_response::Event::Message { peer, message } => match message {
+                request_response::Message::Request {
+                    request, channel, ..
+                } => {
+                    let n = request.len();
+                    debug!("Data from {peer}: {n} bytes");
+                    let _ = self
+                        .swarm
+                        .behaviour_mut()
+                        .data
+                        .send_response(channel, Vec::new());
+                    let _ = self.event_tx.send(NetworkEvent::PacketReceived(PacketData {
+                        from: peer.to_bytes(),
+                        data: request,
+                    }));
                 }
-            }
-            request_response::Event::InboundFailure { peer, request_id: _, error } => {
+                request_response::Message::Response {
+                    request_id,
+                    response: _,
+                } => {
+                    debug!("Data response {request_id}");
+                    self.pending_requests.remove(&request_id);
+                }
+            },
+            request_response::Event::InboundFailure {
+                peer,
+                request_id: _,
+                error,
+            } => {
                 warn!("Inbound failure from {peer}: {error}");
             }
-            request_response::Event::OutboundFailure { peer, request_id, error } => {
+            request_response::Event::OutboundFailure {
+                peer,
+                request_id,
+                error,
+            } => {
                 warn!("Outbound failure to {peer}: {error}");
                 self.pending_requests.remove(&request_id);
             }
@@ -312,7 +364,9 @@ impl P2pNode {
 
     fn remove_peer(&mut self, peer_id: &PeerId) {
         if self.peers.remove(peer_id).is_some() {
-            let _ = self.event_tx.send(NetworkEvent::PeerDisconnected(peer_id.to_bytes()));
+            let _ = self
+                .event_tx
+                .send(NetworkEvent::PeerDisconnected(peer_id.to_bytes()));
         }
     }
 
