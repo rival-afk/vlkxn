@@ -84,7 +84,7 @@ impl P2pNode {
             event_tx,
             packet_tx,
             peers: HashMap::new(),
-            _room: _room,
+            _room,
             virtual_ip,
         };
 

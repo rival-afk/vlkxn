@@ -7,6 +7,12 @@ pub struct ArpProxy {
     ip_to_mac: HashMap<IpAddr, [u8; 6]>,
 }
 
+impl Default for ArpProxy {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl ArpProxy {
     pub fn new() -> Self {
         Self {

@@ -1,4 +1,5 @@
 use eframe::egui;
+use std::process::Command;
 
 #[allow(dead_code)]
 enum AppState {
@@ -14,6 +15,8 @@ struct VlkxnApp {
     nickname: String,
     status_msg: String,
     peers: Vec<String>,
+    needs_permissions: bool,
+    show_setup: bool,
 }
 
 impl Default for VlkxnApp {
@@ -24,7 +27,82 @@ impl Default for VlkxnApp {
             nickname: format!("Player{}", rand::random::<u16>()),
             status_msg: String::new(),
             peers: Vec::new(),
+            needs_permissions: check_capabilities(),
+            show_setup: false,
         }
+    }
+}
+
+fn check_capabilities() -> bool {
+    #[cfg(target_os = "linux")]
+    {
+        if let Ok(output) = Command::new("id").arg("-u").output()
+            && let Ok(uid) = String::from_utf8_lossy(&output.stdout).trim().parse::<u32>()
+                && uid == 0 {
+                    return false;
+                }
+
+        let cap_effective = std::fs::read_to_string("/proc/self/status").ok().and_then(|s| {
+            s.lines().find_map(|l| {
+                if l.starts_with("CapEff:") {
+                    l.split(':').nth(1).map(|s| s.trim().to_string())
+                } else {
+                    None
+                }
+            })
+        });
+
+        if let Some(cap_eff) = cap_effective
+            && let Ok(val) = u64::from_str_radix(&cap_eff, 16)
+                && val & (1 << 12) != 0 {
+                    return false;
+                }
+
+        true
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        false
+    }
+}
+
+fn setup_permissions() -> Result<(), String> {
+    #[cfg(target_os = "linux")]
+    {
+        let self_path = std::env::current_exe().map_err(|e| e.to_string())?;
+        let status = Command::new("pkexec")
+            .args([
+                "setcap",
+                "cap_net_admin+ep",
+                self_path.to_str().unwrap(),
+            ])
+            .status()
+            .map_err(|e| format!("Failed to launch pkexec: {e}"))?;
+
+        if status.success() {
+            return Ok(());
+        }
+
+        let status = Command::new("sudo")
+            .args([
+                "setcap",
+                "cap_net_admin+ep",
+                self_path.to_str().unwrap(),
+            ])
+            .status()
+            .map_err(|e| format!("Failed to launch sudo: {e}"))?;
+
+        if status.success() {
+            Ok(())
+        } else {
+            Err("Permission setup failed".into())
+        }
+    }
+
+    #[cfg(not(target_os = "linux"))]
+    {
+        Err("Not supported on this platform".into())
     }
 }
 
@@ -32,6 +110,11 @@ impl VlkxnApp {
     fn toggle_vpn(&mut self) {
         match &self.state {
             AppState::Disconnected | AppState::Error(_) => {
+                if self.needs_permissions && !self.show_setup {
+                    self.show_setup = true;
+                    return;
+                }
+
                 self.state = AppState::Connecting;
                 self.status_msg = "Connecting...".into();
                 let room = self.room.clone();
@@ -59,6 +142,19 @@ impl VlkxnApp {
             }
         }
     }
+
+    fn run_setup(&mut self) {
+        match setup_permissions() {
+            Ok(()) => {
+                self.needs_permissions = false;
+                self.show_setup = false;
+                self.status_msg = "Permissions configured!".into();
+            }
+            Err(e) => {
+                self.status_msg = format!("Setup failed: {e}");
+            }
+        }
+    }
 }
 
 impl eframe::App for VlkxnApp {
@@ -69,21 +165,15 @@ impl eframe::App for VlkxnApp {
             ui.horizontal(|ui| {
                 ui.heading("🌋 Vlkxn");
                 ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-                    match &self.state {
-                        AppState::Disconnected => {
-                            ui.label(egui::RichText::new("● Disconnected").color(egui::Color32::GRAY));
-                        }
-                        AppState::Connecting => {
-                            ui.label(egui::RichText::new("● Connecting...").color(egui::Color32::YELLOW));
-                        }
-                        AppState::Connected { vip } => {
-                            ui.label(egui::RichText::new("● Connected").color(egui::Color32::GREEN));
-                            ui.label(format!("VIP: {vip}"));
-                            ui.label(format!("Peers: {}", self.peers.len()));
-                        }
-                        AppState::Error(e) => {
-                            ui.label(egui::RichText::new(format!("● Error: {e}")).color(egui::Color32::RED));
-                        }
+                    let (text, color) = match &self.state {
+                        AppState::Disconnected => ("● Disconnected", egui::Color32::GRAY),
+                        AppState::Connecting => ("● Connecting...", egui::Color32::YELLOW),
+                        AppState::Connected { .. } => ("● Connected", egui::Color32::GREEN),
+                        AppState::Error(_) => ("● Error", egui::Color32::RED),
+                    };
+                    ui.label(egui::RichText::new(text).color(color));
+                    if let AppState::Connected { vip } = &self.state {
+                        ui.label(format!("VIP: {vip}  Peers: {}", self.peers.len()));
                     }
                 });
             });
@@ -101,7 +191,7 @@ impl eframe::App for VlkxnApp {
                 };
 
                 let btn = egui::Button::new(egui::RichText::new(btn_text).size(18.0))
-                    .min_size(egui::vec2(200.0, 48.0));
+                    .min_size(egui::vec2(220.0, 48.0));
 
                 if ui.add_enabled(btn_enabled, btn).clicked() {
                     self.toggle_vpn();
@@ -111,6 +201,45 @@ impl eframe::App for VlkxnApp {
             ui.add_space(20.0);
             ui.separator();
             ui.add_space(10.0);
+
+            // Permission setup dialog
+            if self.show_setup {
+                egui::Window::new("🔧 Permission Setup")
+                    .collapsible(false)
+                    .resizable(false)
+                    .anchor(egui::Align2::CENTER_CENTER, [0.0, 0.0])
+                    .show(ctx, |ui| {
+                        ui.vertical_centered(|ui| {
+                            ui.add_space(10.0);
+                            ui.label(egui::RichText::new(
+                                "Vlkxn requires CAP_NET_ADMIN to create\na virtual network adapter."
+                            ).size(14.0));
+                            ui.add_space(10.0);
+                            ui.label("Click below to grant permissions (sudo required):");
+                            ui.add_space(10.0);
+
+                            if ui.button("🔑 Grant Permissions").clicked() {
+                                self.run_setup();
+                            }
+
+                            ui.add_space(5.0);
+                            if ui.button("Cancel").clicked() {
+                                self.show_setup = false;
+                            }
+                            ui.add_space(10.0);
+                        });
+                    });
+            }
+
+            if self.needs_permissions && !self.show_setup {
+                ui.vertical_centered(|ui| {
+                    ui.colored_label(egui::Color32::YELLOW, "⚠ Permissions required for TUN adapter");
+                    if ui.link("Click to setup").clicked() {
+                        self.show_setup = true;
+                    }
+                });
+                ui.add_space(10.0);
+            }
 
             egui::Grid::new("config_grid")
                 .num_columns(2)
@@ -144,7 +273,14 @@ impl eframe::App for VlkxnApp {
             ui.add_space(5.0);
 
             if !self.status_msg.is_empty() {
-                ui.label(&self.status_msg);
+                ui.colored_label(
+                    if self.status_msg.contains("failed") || self.status_msg.contains("Error") {
+                        egui::Color32::RED
+                    } else {
+                        egui::Color32::LIGHT_BLUE
+                    },
+                    &self.status_msg,
+                );
             }
         });
     }
@@ -160,8 +296,8 @@ fn main() -> Result<(), eframe::Error> {
 
     let options = eframe::NativeOptions {
         viewport: egui::ViewportBuilder::default()
-            .with_inner_size([480.0, 520.0])
-            .with_min_inner_size([400.0, 400.0])
+            .with_inner_size([480.0, 560.0])
+            .with_min_inner_size([400.0, 450.0])
             .with_title("Vlkxn — P2P VPN for Gaming"),
         ..Default::default()
     };
