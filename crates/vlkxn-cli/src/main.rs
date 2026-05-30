@@ -148,13 +148,12 @@ async fn main() -> anyhow::Result<()> {
 
             match daemon.start().await {
                 Ok(()) => {
-                    println!("[✓] Virtual interface vlkxn0 created");
-                    println!("[✓] Connected to room: {}", daemon.config.network.room);
-
                     let vip = vlkxn_core::crypto::virtual_ip_from_public_key(
                         &daemon.key_manager.public_key(),
                     );
+                    println!("[✓] Connected to room: {}", daemon.config.network.room);
                     println!("[✓] Virtual IP: {vip}");
+                    println!("[✓] Press Ctrl+C to stop");
 
                     tokio::signal::ctrl_c().await?;
                     daemon.stop().await?;
@@ -174,21 +173,50 @@ async fn main() -> anyhow::Result<()> {
         Commands::Status => {
             print_welcome();
             let daemon = Daemon::new().await?;
-            println!("{}", daemon.status());
+            if daemon.is_running() {
+                println!("{}", daemon.status().await);
+            } else {
+                println!("Vlkxn is not running");
+                println!("  Start with: vlkxn up --room <room>");
+                println!("  Config: ~/.config/vlkxn/config.toml");
+                let vip = vlkxn_core::crypto::virtual_ip_from_public_key(
+                    &daemon.key_manager.public_key(),
+                );
+                println!("  Your virtual IP: {vip}");
+                println!("  Room: {}", daemon.config.network.room);
+            }
         }
         Commands::List => {
             print_welcome();
-            println!("Peers: (connect first with `vlkxn up`)");
-            println!("  No active connection");
+            let daemon = Daemon::new().await?;
+            if daemon.is_running() {
+                let peers = daemon.peer_list().await;
+                if peers.is_empty() {
+                    println!("No peers connected");
+                } else {
+                    println!("Peers ({}):", peers.len());
+                    for p in &peers {
+                        let conn = match p.connection_type {
+                            vlkxn_core::types::ConnectionType::Direct => "direct",
+                            vlkxn_core::types::ConnectionType::Relay => "relay",
+                        };
+                        println!(
+                            "  {} (IP: {}, ping: {}ms, {conn})",
+                            p.nickname, p.virtual_ip, p.ping_ms
+                        );
+                    }
+                }
+            } else {
+                println!("Vlkxn is not running");
+                println!("  Start with: vlkxn up --room <room>");
+            }
         }
         Commands::Install => {
             #[cfg(target_os = "linux")]
             {
                 println!("🔧 Setting up Vlkxn permissions...");
                 match setup_linux_capabilities() {
-                    Ok(()) => {
-                        println!("[✓] Setup complete! Run `vlkxn up` to start.");
-                    }
+                    Ok(()) => println!("[✓] Setup complete! Run `vlkxn up` to start."),
                     Err(e) => {
                         eprintln!("[✗] {e}");
                         std::process::exit(1);

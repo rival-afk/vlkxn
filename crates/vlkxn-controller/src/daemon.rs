@@ -1,6 +1,6 @@
 use std::sync::Arc;
 
-use tokio::sync::Mutex;
+use tokio::sync::RwLock;
 use tracing::{error, info, warn};
 use vlkxn_core::config::Config;
 use vlkxn_core::crypto::KeyManager;
@@ -11,6 +11,8 @@ use vlkxn_core::types::*;
 pub struct Daemon {
     pub config: Config,
     pub key_manager: KeyManager,
+    peers: Arc<RwLock<Vec<PeerInfo>>>,
+    virtual_ip: std::net::IpAddr,
     shutdown: Option<Arc<tokio::sync::Notify>>,
     handles: Option<Vec<tokio::task::JoinHandle<()>>>,
 }
@@ -24,6 +26,8 @@ impl Daemon {
         Ok(Self {
             config,
             key_manager,
+            peers: Arc::new(RwLock::new(Vec::new())),
+            virtual_ip: std::net::IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
             shutdown: None,
             handles: None,
         })
@@ -34,6 +38,7 @@ impl Daemon {
 
         let virtual_ip =
             vlkxn_core::crypto::virtual_ip_from_public_key(&self.key_manager.public_key());
+        self.virtual_ip = virtual_ip;
 
         let mut tun = TunInterface::new("vlkxn0");
         tun.create(virtual_ip, 16).await?;
@@ -46,9 +51,11 @@ impl Daemon {
         )
         .await?;
 
-        info!("P2P peer ID: {}", p2p_node.peer_id());
+        let peer_id = p2p_node.peer_id();
+        info!("P2P peer ID: {peer_id}");
 
         let packet_tx = p2p_node.packet_tx.clone();
+        let peers = self.peers.clone();
         let shutdown = Arc::new(tokio::sync::Notify::new());
         let mut handles = Vec::new();
 
@@ -61,10 +68,11 @@ impl Daemon {
             }
         }));
 
-        // Task 2: Event handler (P2P → TUN)
-        let tun = Arc::new(Mutex::new(tun));
+        // Task 2: Event handler (P2P → TUN, keeps peer list)
+        let tun = Arc::new(tokio::sync::Mutex::new(tun));
         let tun_ev = tun.clone();
         let s2 = shutdown.clone();
+        let p2 = peers.clone();
         handles.push(tokio::spawn(async move {
             let mut event_rx = event_rx;
             loop {
@@ -73,9 +81,15 @@ impl Daemon {
                     Some(event) = event_rx.recv() => match event {
                         NetworkEvent::PeerConnected(info) => {
                             info!("Peer connected: {} (IP: {})", info.nickname, info.virtual_ip);
+                            let mut peers = p2.write().await;
+                            if !peers.iter().any(|p| p.node_id == info.node_id) {
+                                peers.push(info);
+                            }
                         }
                         NetworkEvent::PeerDisconnected(node_id) => {
                             info!("Peer disconnected: {:?}", &node_id[..4]);
+                            let mut peers = p2.write().await;
+                            peers.retain(|p| p.node_id != node_id);
                         }
                         NetworkEvent::VirtualIpAssigned(ip) => {
                             info!("Virtual IP assigned: {ip}");
@@ -137,6 +151,7 @@ impl Daemon {
             tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         }
         self.handles = None;
+        self.peers.write().await.clear();
         info!("Vlkxn daemon stopped");
         Ok(())
     }
@@ -145,15 +160,37 @@ impl Daemon {
         self.shutdown.is_some()
     }
 
-    pub fn status(&self) -> String {
-        if self.is_running() {
-            format!(
-                "Vlkxn is running\nRoom: {}\nPeers: active",
-                self.config.network.room,
-            )
-        } else {
-            "Vlkxn is not running".to_string()
+    pub async fn status(&self) -> String {
+        if !self.is_running() {
+            return "Vlkxn is not running".into();
         }
+        let peers = self.peers.read().await;
+        let peer_count = peers.len();
+        let peer_list: Vec<String> = peers
+            .iter()
+            .map(|p| {
+                let conn_type = match p.connection_type {
+                    ConnectionType::Direct => "direct",
+                    ConnectionType::Relay => "relay",
+                };
+                format!(
+                    "  {} (IP: {}, ping: {}ms, {conn_type})",
+                    p.nickname, p.virtual_ip, p.ping_ms
+                )
+            })
+            .collect();
+
+        format!(
+            "Vlkxn is running\nRoom: {room}\nVirtual IP: {vip}\nPeers ({n}):\n{list}",
+            room = self.config.network.room,
+            vip = self.virtual_ip,
+            n = peer_count,
+            list = peer_list.join("\n"),
+        )
+    }
+
+    pub async fn peer_list(&self) -> Vec<PeerInfo> {
+        self.peers.read().await.clone()
     }
 }
 
