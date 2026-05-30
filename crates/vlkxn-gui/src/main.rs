@@ -37,26 +37,32 @@ fn check_capabilities() -> bool {
     #[cfg(target_os = "linux")]
     {
         if let Ok(output) = Command::new("id").arg("-u").output()
-            && let Ok(uid) = String::from_utf8_lossy(&output.stdout).trim().parse::<u32>()
-                && uid == 0 {
-                    return false;
-                }
+            && let Ok(uid) = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u32>()
+            && uid == 0
+        {
+            return false;
+        }
 
-        let cap_effective = std::fs::read_to_string("/proc/self/status").ok().and_then(|s| {
-            s.lines().find_map(|l| {
-                if l.starts_with("CapEff:") {
-                    l.split(':').nth(1).map(|s| s.trim().to_string())
-                } else {
-                    None
-                }
-            })
-        });
+        let cap_effective = std::fs::read_to_string("/proc/self/status")
+            .ok()
+            .and_then(|s| {
+                s.lines().find_map(|l| {
+                    if l.starts_with("CapEff:") {
+                        l.split(':').nth(1).map(|s| s.trim().to_string())
+                    } else {
+                        None
+                    }
+                })
+            });
 
         if let Some(cap_eff) = cap_effective
             && let Ok(val) = u64::from_str_radix(&cap_eff, 16)
-                && val & (1 << 12) != 0 {
-                    return false;
-                }
+            && val & (1 << 12) != 0
+        {
+            return false;
+        }
 
         true
     }
@@ -72,11 +78,7 @@ fn setup_permissions() -> Result<(), String> {
     {
         let self_path = std::env::current_exe().map_err(|e| e.to_string())?;
         let status = Command::new("pkexec")
-            .args([
-                "setcap",
-                "cap_net_admin+ep",
-                self_path.to_str().unwrap(),
-            ])
+            .args(["setcap", "cap_net_admin+ep", self_path.to_str().unwrap()])
             .status()
             .map_err(|e| format!("Failed to launch pkexec: {e}"))?;
 
@@ -85,11 +87,7 @@ fn setup_permissions() -> Result<(), String> {
         }
 
         let status = Command::new("sudo")
-            .args([
-                "setcap",
-                "cap_net_admin+ep",
-                self_path.to_str().unwrap(),
-            ])
+            .args(["setcap", "cap_net_admin+ep", self_path.to_str().unwrap()])
             .status()
             .map_err(|e| format!("Failed to launch sudo: {e}"))?;
 
@@ -233,7 +231,10 @@ impl eframe::App for VlkxnApp {
 
             if self.needs_permissions && !self.show_setup {
                 ui.vertical_centered(|ui| {
-                    ui.colored_label(egui::Color32::YELLOW, "⚠ Permissions required for TUN adapter");
+                    ui.colored_label(
+                        egui::Color32::YELLOW,
+                        "⚠ Permissions required for TUN adapter",
+                    );
                     if ui.link("Click to setup").clicked() {
                         self.show_setup = true;
                     }
@@ -245,7 +246,8 @@ impl eframe::App for VlkxnApp {
                 .num_columns(2)
                 .spacing([8.0, 8.0])
                 .show(ui, |ui| {
-                    let editable = matches!(self.state, AppState::Disconnected | AppState::Error(_));
+                    let editable =
+                        matches!(self.state, AppState::Disconnected | AppState::Error(_));
                     ui.label("Room:");
                     ui.add_enabled(editable, egui::TextEdit::singleline(&mut self.room));
                     ui.end_row();
@@ -289,8 +291,7 @@ impl eframe::App for VlkxnApp {
 fn main() -> Result<(), eframe::Error> {
     tracing_subscriber::fmt()
         .with_env_filter(
-            tracing_subscriber::EnvFilter::try_from_default_env()
-                .unwrap_or_else(|_| "info".into()),
+            tracing_subscriber::EnvFilter::try_from_default_env().unwrap_or_else(|_| "info".into()),
         )
         .init();
 

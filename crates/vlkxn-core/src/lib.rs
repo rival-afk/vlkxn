@@ -1,9 +1,9 @@
+pub mod arp;
 pub mod config;
 pub mod crypto;
 pub mod p2p;
 pub mod tun;
 pub mod types;
-pub mod arp;
 
 pub use config::Config;
 pub use crypto::KeyManager;

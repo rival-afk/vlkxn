@@ -22,7 +22,13 @@ impl Daemon {
         let keys_path = Config::keys_path()?;
         let key_manager = KeyManager::load_or_generate(&keys_path)?;
 
-        Ok(Self { config, key_manager, p2p: None, tun: None, running: false })
+        Ok(Self {
+            config,
+            key_manager,
+            p2p: None,
+            tun: None,
+            running: false,
+        })
     }
 
     pub async fn start(&mut self) -> anyhow::Result<()> {
@@ -60,7 +66,10 @@ impl Daemon {
             while let Some(event) = event_rx.recv().await {
                 match event {
                     NetworkEvent::PeerConnected(info) => {
-                        info!("Peer connected: {} (IP: {})", info.nickname, info.virtual_ip);
+                        info!(
+                            "Peer connected: {} (IP: {})",
+                            info.nickname, info.virtual_ip
+                        );
                     }
                     NetworkEvent::PeerDisconnected(node_id) => {
                         info!("Peer disconnected: {:?}", &node_id[..4]);

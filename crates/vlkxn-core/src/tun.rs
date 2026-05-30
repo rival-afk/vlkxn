@@ -34,7 +34,9 @@ mod platform {
 
             if res < 0 {
                 let e = std::io::Error::last_os_error();
-                unsafe { libc::close(fd); }
+                unsafe {
+                    libc::close(fd);
+                }
                 anyhow::bail!("Failed to create TUN: {e}");
             }
 
@@ -70,12 +72,13 @@ mod platform {
     use std::process::Command;
     use std::sync::Arc;
 
-    use tokio::sync::mpsc;
+    use tokio::sync::Mutex;
 
     pub struct TunFd {
-        adapter: wintun::Adapter,
+        _adapter: wintun::Adapter,
         session: Arc<wintun::Session>,
-        read_rx: mpsc::Receiver<Vec<u8>>,
+        read_buf: Arc<Mutex<Vec<u8>>>,
+        read_ready: Arc<tokio::sync::Notify>,
     }
 
     impl TunFd {
@@ -83,45 +86,64 @@ mod platform {
             let wintun = unsafe { wintun::load() }
                 .map_err(|e| anyhow::anyhow!("wintun.dll not found: {e}"))?;
 
-            let guid = uuid::Uuid::new_v4();
-            let adapter = wintun::Adapter::create(&wintun, name, "Vlkxn", Some(&guid))?;
+            let guid = uuid::Uuid::new_v4().as_u128();
+            let adapter = wintun::Adapter::create(&wintun, name, "Vlkxn", Some(guid))?;
             let session = Arc::new(adapter.start_session(wintun::MAX_RING_CAPACITY)?);
 
-            let (tx, rx) = mpsc::channel(256);
+            let read_buf = Arc::new(Mutex::new(Vec::new()));
+            let read_ready = Arc::new(tokio::sync::Notify::new());
             let s = session.clone();
+            let rb = read_buf.clone();
+            let rr = read_ready.clone();
+
             tokio::task::spawn_blocking(move || {
                 loop {
                     match s.receive_blocking() {
                         Ok(packet) => {
                             let bytes = packet.bytes().to_vec();
-                            if tx.blocking_send(bytes).is_err() {
-                                break;
-                            }
+                            let mut buf = rb.blocking_lock();
+                            *buf = bytes;
+                            rr.notify_one();
                         }
                         Err(_) => break,
                     }
                 }
             });
 
-            Ok(Self { adapter, session, read_rx: rx })
+            Ok(Self {
+                _adapter: adapter,
+                session,
+                read_buf,
+                read_ready,
+            })
         }
 
         pub fn set_ip(name: &str, ip: &str, netmask: u8) -> anyhow::Result<()> {
-            let prefix_len = netmask;
-            let mask = u32::MAX.checked_shl(32 - prefix_len as u32).unwrap_or(0).to_be_bytes();
+            let mask = u32::MAX
+                .checked_shl(32 - netmask as u32)
+                .unwrap_or(0)
+                .to_be_bytes();
             let mask_str = format!("{}.{}.{}.{}", mask[0], mask[1], mask[2], mask[3]);
 
             Command::new("netsh")
                 .args([
-                    "interface", "ip", "set", "address",
+                    "interface",
+                    "ip",
+                    "set",
+                    "address",
                     &format!("name=\"{name}\""),
-                    "static", ip, &mask_str,
+                    "static",
+                    ip,
+                    &mask_str,
                 ])
                 .status()?;
 
             Command::new("netsh")
                 .args([
-                    "interface", "ip", "set", "interface",
+                    "interface",
+                    "ip",
+                    "set",
+                    "interface",
                     &format!("name=\"{name}\""),
                     "admin=enabled",
                 ])
@@ -131,15 +153,16 @@ mod platform {
         }
 
         pub async fn read(&self, buf: &mut [u8]) -> anyhow::Result<usize> {
-            let mut rx = self.read_rx.clone();
-            let packet = rx.recv().await.ok_or_else(|| anyhow::anyhow!("TUN read channel closed"))?;
-            let n = packet.len().min(buf.len());
-            buf[..n].copy_from_slice(&packet[..n]);
+            self.read_ready.notified().await;
+            let mut rb = self.read_buf.lock().await;
+            let n = rb.len().min(buf.len());
+            buf[..n].copy_from_slice(&rb[..n]);
+            rb.clear();
             Ok(n)
         }
 
         pub async fn write(&self, buf: &[u8]) -> anyhow::Result<()> {
-            let mut packet = self.session.allocate_send_packet(buf.len())?;
+            let mut packet = self.session.allocate_send_packet(buf.len() as u16)?;
             packet.bytes_mut().copy_from_slice(buf);
             self.session.send_packet(packet);
             Ok(())
@@ -155,7 +178,11 @@ pub struct TunInterface {
 
 impl TunInterface {
     pub fn new(name: &str) -> Self {
-        Self { fd: None, name: name.to_string(), virtual_ip: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED) }
+        Self {
+            fd: None,
+            name: name.to_string(),
+            virtual_ip: IpAddr::V4(std::net::Ipv4Addr::UNSPECIFIED),
+        }
     }
 
     pub async fn create(&mut self, ip: IpAddr, netmask: u8) -> anyhow::Result<()> {

@@ -4,7 +4,11 @@ use tracing_subscriber::EnvFilter;
 use vlkxn_controller::Daemon;
 
 #[derive(Parser)]
-#[command(name = "vlkxn", version, about = "Vlkxn - Decentralized P2P VPN for gaming")]
+#[command(
+    name = "vlkxn",
+    version,
+    about = "Vlkxn - Decentralized P2P VPN for gaming"
+)]
 struct Cli {
     #[command(subcommand)]
     command: Commands,
@@ -46,15 +50,19 @@ fn check_linux_capabilities() -> bool {
 
         if let Some(cap_eff) = cap_effective
             && let Ok(val) = u64::from_str_radix(&cap_eff, 16)
-                && val & (1 << 12) != 0 {
-                    return true;
-                }
+            && val & (1 << 12) != 0
+        {
+            return true;
+        }
 
         if let Ok(output) = Command::new("id").arg("-u").output()
-            && let Ok(uid) = String::from_utf8_lossy(&output.stdout).trim().parse::<u32>()
-                && uid == 0 {
-                    return true;
-                }
+            && let Ok(uid) = String::from_utf8_lossy(&output.stdout)
+                .trim()
+                .parse::<u32>()
+            && uid == 0
+        {
+            return true;
+        }
 
         false
     }
@@ -70,11 +78,7 @@ fn setup_linux_capabilities() -> anyhow::Result<()> {
     {
         let self_path = std::env::current_exe()?;
         let status = Command::new("sudo")
-            .args([
-                "setcap",
-                "cap_net_admin+ep",
-                self_path.to_str().unwrap(),
-            ])
+            .args(["setcap", "cap_net_admin+ep", self_path.to_str().unwrap()])
             .status()?;
 
         if status.success() {
@@ -82,7 +86,10 @@ fn setup_linux_capabilities() -> anyhow::Result<()> {
             println!("[✓] You can now run Vlkxn without sudo!");
             Ok(())
         } else {
-            anyhow::bail!("Failed to set capabilities. Try: sudo setcap cap_net_admin+ep {}", self_path.display())
+            anyhow::bail!(
+                "Failed to set capabilities. Try: sudo setcap cap_net_admin+ep {}",
+                self_path.display()
+            )
         }
     }
 
@@ -94,7 +101,10 @@ fn setup_linux_capabilities() -> anyhow::Result<()> {
 }
 
 fn print_welcome() {
-    println!("🌋 Vlkxn v{} — Decentralized P2P VPN for Gaming", env!("CARGO_PKG_VERSION"));
+    println!(
+        "🌋 Vlkxn v{} — Decentralized P2P VPN for Gaming",
+        env!("CARGO_PKG_VERSION")
+    );
     println!();
 }
 

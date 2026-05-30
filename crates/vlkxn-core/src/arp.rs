@@ -1,8 +1,6 @@
 use std::collections::HashMap;
 use std::net::IpAddr;
 
-
-
 pub struct ArpProxy {
     ip_to_mac: HashMap<IpAddr, [u8; 6]>,
 }
