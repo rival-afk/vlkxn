@@ -1,0 +1,28 @@
+[package]
+name = "vlkxn-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+tokio.workspace = true
+tracing.workspace = true
+anyhow.workspace = true
+serde.workspace = true
+serde_json.workspace = true
+toml.workspace = true
+libp2p.workspace = true
+ed25519-dalek.workspace = true
+rand.workspace = true
+sha2.workspace = true
+hex.workspace = true
+directories.workspace = true
+futures.workspace = true
+bytes.workspace = true
+ipnetwork.workspace = true
+pnet.workspace = true
+
+[target.'cfg(target_os = "linux")'.dependencies]
+libc = "0.2"
+nix = { version = "0.30", features = ["ioctl", "poll"] }

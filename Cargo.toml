@@ -1,0 +1,44 @@
+[workspace]
+resolver = "3"
+members = [
+    "crates/vlkxn-core",
+    "crates/vlkxn-controller",
+    "crates/vlkxn-cli",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+license = "GPL-3.0-only"
+authors = ["Vlkxn Contributors"]
+
+[workspace.dependencies]
+tokio = { version = "1.38", features = ["full"] }
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+toml = "0.8"
+clap = { version = "4.5", features = ["derive"] }
+libp2p = { version = "0.54", features = [
+    "tokio",
+    "tcp",
+    "dns",
+    "kad",
+    "mdns",
+    "noise",
+    "yamux",
+    "identify",
+    "macros",
+    "ping",
+] }
+ed25519-dalek = { version = "2.1", features = ["serde"] }
+rand = "0.8"
+sha2 = "0.10"
+hex = "0.4"
+directories = "5.0"
+futures = "0.3"
+bytes = "1.6"
+ipnetwork = "0.20"
+pnet = "0.35"
