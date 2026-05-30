@@ -4,6 +4,7 @@ members = [
     "crates/vlkxn-core",
     "crates/vlkxn-controller",
     "crates/vlkxn-cli",
+    "crates/vlkxn-gui",
 ]
 
 [workspace.package]

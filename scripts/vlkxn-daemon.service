@@ -1,0 +1,15 @@
+[Unit]
+Description=Vlkxn P2P VPN Daemon
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/vlkxn-cli up
+ExecStop=/usr/bin/vlkxn-cli down
+Restart=on-failure
+RestartSec=5
+AmbientCapabilities=CAP_NET_ADMIN
+
+[Install]
+WantedBy=default.target

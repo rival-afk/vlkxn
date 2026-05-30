@@ -1,1 +1,0 @@
-window.SIDEBAR_ITEMS = {"struct":["DecodeError","Emoji"],"trait":["Base"],"type":["Alphabet"]};

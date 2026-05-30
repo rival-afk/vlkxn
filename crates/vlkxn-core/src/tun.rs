@@ -1,6 +1,5 @@
 use std::io::{Read, Write};
 use std::net::IpAddr;
-use std::os::fd::AsRawFd;
 use std::process::Command;
 
 use tokio::io::unix::AsyncFd;
@@ -93,14 +92,14 @@ impl TunInterface {
 #[cfg(target_os = "linux")]
 fn create_tun_fd(name: &str) -> anyhow::Result<std::fs::File> {
     use std::mem;
-    use std::os::fd::FromRawFd;
+    use std::os::fd::{FromRawFd, IntoRawFd};
 
     let owned_fd = nix::fcntl::open(
         "/dev/net/tun",
         nix::fcntl::OFlag::O_RDWR,
         nix::sys::stat::Mode::empty(),
     )?;
-    let fd = owned_fd.as_raw_fd();
+    let fd = owned_fd.into_raw_fd();
 
     let mut ifreq: libc::ifreq = unsafe { mem::zeroed() };
 
@@ -116,7 +115,7 @@ fn create_tun_fd(name: &str) -> anyhow::Result<std::fs::File> {
 
     if res < 0 {
         let e = std::io::Error::last_os_error();
-        nix::unistd::close(fd)?;
+        unsafe { libc::close(fd); }
         anyhow::bail!("Failed to create TUN interface: {e}");
     }
 

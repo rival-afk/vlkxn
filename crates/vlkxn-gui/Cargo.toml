@@ -1,0 +1,17 @@
+[package]
+name = "vlkxn-gui"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+authors.workspace = true
+
+[dependencies]
+vlkxn-core = { path = "../vlkxn-core" }
+vlkxn-controller = { path = "../vlkxn-controller" }
+eframe = "0.31"
+egui = "0.31"
+tracing = "0.1"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+anyhow = "1.0"
+rand = "0.8"
+tokio = { version = "1.38", features = ["rt", "macros", "sync"] }
