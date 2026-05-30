@@ -80,13 +80,15 @@ fn setup_linux_capabilities() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     {
         let self_path = std::env::current_exe()?;
+
+        let self_path_str = self_path.to_str().unwrap();
         let status = Command::new("sudo")
-            .args(["setcap", "cap_net_admin+ep", self_path.to_str().unwrap()])
+            .args(["setcap", "cap_net_admin+ep", self_path_str])
             .status()?;
 
         if status.success() {
             println!("[✓] CAP_NET_ADMIN capability set!");
-            println!("[✓] You can now run Vlkxn without sudo!");
+            println!("[✓] Теперь TUN создаётся без root!");
             Ok(())
         } else {
             anyhow::bail!(
@@ -116,12 +118,10 @@ fn print_permission_hint() {
     {
         if !check_linux_capabilities() {
             println!("⚠ Linux: требуется CAP_NET_ADMIN для TUN адаптера");
-            println!("  Запустите один раз:");
-            println!("    sudo vlkxn install");
-            println!("  или:");
-            println!("    sudo setcap cap_net_admin+ep $(which vlkxn)");
-            println!("  или запустите с sudo:");
+            println!("  Запустите через sudo:");
             println!("    sudo vlkxn up --room MyGame");
+            println!("  Или установите capabilities (TUN без root, ip route требует root):");
+            println!("    sudo setcap cap_net_admin+ep $(which vlkxn)");
             println!();
         }
     }

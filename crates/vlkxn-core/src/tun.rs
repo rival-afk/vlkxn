@@ -31,12 +31,9 @@ mod platform {
             ifreq.ifr_ifru.ifru_flags = (libc::IFF_TUN | libc::IFF_NO_PI) as i16;
 
             let res = unsafe { libc::ioctl(fd, libc::TUNSETIFF, &ifreq as *const libc::ifreq) };
-
             if res < 0 {
                 let e = std::io::Error::last_os_error();
-                unsafe {
-                    libc::close(fd);
-                }
+                unsafe { libc::close(fd) };
                 anyhow::bail!("Failed to create TUN: {e}");
             }
 
@@ -51,7 +48,6 @@ mod platform {
             Command::new("ip")
                 .args(["link", "set", "dev", name, "up"])
                 .status()?;
-            // Route virtual subnet through TUN
             Command::new("ip")
                 .args(["route", "add", crate::types::VIRTUAL_NETWORK, "dev", name])
                 .status()?;
