@@ -1,4 +1,5 @@
 use clap::{Parser, Subcommand};
+#[cfg(target_os = "linux")]
 use std::process::Command;
 use tracing_subscriber::EnvFilter;
 use vlkxn_controller::Daemon;
@@ -33,6 +34,7 @@ enum Commands {
     Install,
 }
 
+#[cfg(target_os = "linux")]
 fn check_linux_capabilities() -> bool {
     #[cfg(target_os = "linux")]
     {
@@ -73,6 +75,7 @@ fn check_linux_capabilities() -> bool {
     }
 }
 
+#[cfg(target_os = "linux")]
 fn setup_linux_capabilities() -> anyhow::Result<()> {
     #[cfg(target_os = "linux")]
     {
