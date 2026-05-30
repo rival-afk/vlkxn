@@ -4,7 +4,9 @@ use async_trait::async_trait;
 use futures::StreamExt;
 use futures::io::{AsyncRead, AsyncReadExt, AsyncWrite, AsyncWriteExt};
 use libp2p::{
-    PeerId, StreamProtocol, Swarm, SwarmBuilder, dcutr, identify, kad, mdns, noise, ping, relay,
+    PeerId, StreamProtocol, Swarm, SwarmBuilder, dcutr, identify, kad, mdns,
+    multiaddr::Protocol,
+    noise, ping, relay,
     request_response::{self, Codec, ProtocolSupport},
     swarm::{NetworkBehaviour, SwarmEvent},
     tcp, yamux,
@@ -139,7 +141,21 @@ impl P2pNode {
         let peer_id = PeerId::from(libp2p_keypair.public());
 
         let kad_store = kad::store::MemoryStore::new(peer_id);
-        let kademlia = kad::Behaviour::new(peer_id, kad_store);
+        let mut kademlia = kad::Behaviour::new(peer_id, kad_store);
+
+        // Bootstrap nodes для кросс-интернет DHT
+        let bootstrap_nodes = [
+            "/dns/bootstrap.libp2p.io/tcp/4001/p2p/12D3KooWJhM3FYv7oRhjMp56HbQJCmY7mAR4sQMHvfNmhWZYbtKj",
+            "/dns/bootstrap.libp2p.io/tcp/4001/p2p/12D3KooWJg7EzgGvQYi34K7o3qohS2fYNEMicqYdEHJ8tJsJqLPz",
+            "/dns/bootstrap.libp2p.io/tcp/4001/p2p/12D3KooWHjB5DoxXULMCPjDCjMHD6bSoBJGs17SWizUpBn5UBpCq",
+        ];
+        for addr_str in &bootstrap_nodes {
+            if let Ok(addr) = addr_str.parse::<libp2p::Multiaddr>() {
+                if let Some(Protocol::P2p(peer_id)) = addr.iter().last() {
+                    kademlia.add_address(&peer_id, addr);
+                }
+            }
+        }
         let mdns = mdns::tokio::Behaviour::new(mdns::Config::default(), peer_id)?;
         let mut identify_cfg =
             identify::Config::new("/vlkxn/1.0.0".into(), libp2p_keypair.public());

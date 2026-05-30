@@ -19,6 +19,7 @@ pub struct NicknameConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct NetworkConfig {
     pub room: String,
+    #[serde(default)]
     pub password: String,
     pub autostart: bool,
 }
