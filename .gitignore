@@ -1,2 +1,7 @@
 PROJECT_SPECIFICATION.md
 .env
+target/
+.DS_Store
+*.swp
+*.swo
+*~
